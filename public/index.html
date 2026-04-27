@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Undercover — เกมสายลับ</title>
+<script src="/socket.io/socket.io.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080810;
+    --bg2: #0f0f1a;
+    --bg3: #161625;
+    --accent: #c8a96e;
+    --accent2: #e8c87e;
+    --red: #c0392b;
+    --green: #1a7a4a;
+    --text: #e8e4d8;
+    --muted: #6a6460;
+    --border: rgba(200,169,110,0.18);
+    --card: rgba(255,255,255,0.025);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Sarabun', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+  body::before { content:''; position:fixed; inset:0; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E"); pointer-events:none; z-index:0; }
+
+  .screen { display:none; position:relative; z-index:1; min-height:100vh; padding:1.5rem 1rem; max-width:500px; margin:0 auto; flex-direction:column; }
+  .screen.active { display:flex; animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+
+  .logo { font-family:'Bebas Neue'; font-size:48px; letter-spacing:8px; color:var(--accent); text-align:center; line-height:1; }
+  .logo span { color:var(--red); }
+  .tagline { text-align:center; font-size:11px; color:var(--muted); letter-spacing:3px; text-transform:uppercase; margin-top:4px; }
+
+  .deco { display:flex; align-items:center; gap:12px; margin:1.5rem 0; }
+  .deco::before,.deco::after { content:''; flex:1; height:1px; background:var(--border); }
+  .deco span { color:var(--accent); font-size:11px; letter-spacing:2px; text-transform:uppercase; }
+
+  .card { background:var(--card); border:1px solid var(--border); border-radius:2px; padding:1.25rem; margin-bottom:1rem; position:relative; }
+  .card::before { content:''; position:absolute; top:0; left:0; width:3px; height:100%; background:var(--accent); border-radius:2px 0 0 2px; }
+
+  .lbl { font-size:11px; letter-spacing:2px; color:var(--accent); text-transform:uppercase; margin-bottom:8px; display:block; }
+
+  input[type=text] { width:100%; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:2px; padding:10px 14px; color:var(--text); font-family:'Sarabun',sans-serif; font-size:15px; outline:none; transition:border-color 0.2s; margin-bottom:10px; }
+  input[type=text]:focus { border-color:var(--accent); }
+  input[type=text]::placeholder { color:var(--muted); }
+
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:11px 22px; font-family:'Sarabun',sans-serif; font-size:14px; font-weight:500; letter-spacing:1px; border:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; transition:all 0.2s; border-radius:2px; }
+  .btn:hover { border-color:var(--accent); color:var(--accent); }
+  .btn:active { transform:scale(0.98); }
+  .btn-primary { background:var(--accent); border-color:var(--accent); color:#080810; font-weight:600; }
+  .btn-primary:hover { background:var(--accent2); border-color:var(--accent2); color:#080810; }
+  .btn-danger { border-color:var(--red); color:var(--red); }
+  .btn-danger:hover { background:rgba(192,57,43,0.1); }
+  .btn-full { width:100%; }
+  .btn-sm { padding:7px 14px; font-size:13px; }
+  .btn:disabled { opacity:0.4; cursor:not-allowed; }
+
+  .check-row { display:flex; align-items:center; gap:10px; padding:8px 0; cursor:pointer; }
+  .chk { width:18px; height:18px; border:1px solid var(--border); border-radius:2px; display:flex; align-items:center; justify-content:center; transition:all 0.2s; flex-shrink:0; }
+  .chk.on { background:var(--accent); border-color:var(--accent); }
+  .chk.on::after { content:'✓'; font-size:12px; color:#080810; font-weight:700; }
+
+  .code-display { font-family:'Bebas Neue'; font-size:52px; letter-spacing:12px; color:var(--accent); text-align:center; padding:1rem 0; text-shadow:0 0 30px rgba(200,169,110,0.3); }
+
+  .player-row { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border:1px solid rgba(255,255,255,0.05); border-radius:2px; margin-bottom:5px; }
+  .player-row.eliminated { opacity:0.3; }
+  .player-row.vote-on { border-color:var(--red); background:rgba(192,57,43,0.06); }
+  .player-row.selectable { cursor:pointer; }
+  .player-row.selectable:hover { border-color:var(--accent); background:rgba(200,169,110,0.04); }
+
+  .av { width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; flex-shrink:0; }
+  .flex { display:flex; align-items:center; gap:10px; }
+  .flex-sb { display:flex; align-items:center; justify-content:space-between; }
+
+  .role-tag { display:inline-block; font-size:10px; letter-spacing:2px; padding:3px 10px; border-radius:1px; text-transform:uppercase; }
+  .r-citizen { background:rgba(26,122,74,0.2); border:1px solid var(--green); color:#4eca8a; }
+  .r-undercover { background:rgba(192,57,43,0.2); border:1px solid var(--red); color:#e07060; }
+  .r-white { background:rgba(200,169,110,0.1); border:1px solid var(--accent); color:var(--accent); }
+
+  .word-card { background:var(--bg3); border:1px solid var(--accent); padding:1.5rem 2.5rem; text-align:center; margin:1.5rem 0; position:relative; }
+  .word-card::before,.word-card::after { content:''; position:absolute; width:12px; height:12px; border-color:var(--accent); border-style:solid; }
+  .word-card::before { top:-1px; left:-1px; border-width:2px 0 0 2px; }
+  .word-card::after { bottom:-1px; right:-1px; border-width:0 2px 2px 0; }
+  .word-big { font-family:'Bebas Neue'; font-size:44px; letter-spacing:5px; color:var(--text); }
+
+  .vote-bar { height:3px; background:rgba(200,169,110,0.15); border-radius:2px; margin-bottom:1rem; }
+  .vote-bar-fill { height:100%; background:var(--accent); border-radius:2px; transition:width 0.4s; }
+
+  .toast { position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%); background:#1a1a24; border:1px solid var(--accent); padding:10px 20px; border-radius:2px; font-size:14px; color:var(--text); z-index:99; animation:toastIn 0.3s ease; white-space:nowrap; }
+  @keyframes toastIn { from{opacity:0;transform:translateX(-50%) translateY(10px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+
+  .badge { font-size:11px; padding:2px 8px; border-radius:99px; }
+  .badge-red { background:rgba(192,57,43,0.3); color:#e07060; border:1px solid rgba(192,57,43,0.4); }
+  .badge-green { background:rgba(26,122,74,0.3); color:#4eca8a; border:1px solid rgba(26,122,74,0.4); }
+
+  .random-btn { font-size:11px; color:var(--accent); background:none; border:none; cursor:pointer; text-decoration:underline; font-family:'Sarabun',sans-serif; padding:0; }
+
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(200,169,110,0.35)} 50%{box-shadow:0 0 0 8px rgba(200,169,110,0)} }
+  .pulse { animation:pulse 2s infinite; }
+
+  ::-webkit-scrollbar { width:4px; }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+  .section-lbl { font-size:10px; letter-spacing:3px; color:var(--accent); text-transform:uppercase; margin-bottom:10px; }
+
+  .end-title { font-family:'Bebas Neue'; font-size:44px; letter-spacing:6px; text-align:center; }
+  .c-citizen { color:#4eca8a; } .c-under { color:#e07060; } .c-white { color:var(--accent); }
+
+  .word-pill { flex:1; text-align:center; padding:10px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:2px; }
+  .wlbl { font-size:10px; letter-spacing:2px; color:var(--muted); margin-bottom:4px; text-transform:uppercase; }
+  .wval { font-size:18px; font-weight:600; }
+
+  .mt { margin-top:1rem; }
+  .mt2 { margin-top:1.5rem; }
+  .center { text-align:center; }
+  .muted { color:var(--muted); }
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<div id="s-home" class="screen active">
+  <div style="padding-top:2rem; margin-bottom:2rem;">
+    <div class="logo">UNDER<span>COVER</span></div>
+    <div class="tagline">เกมสายลับออนไลน์ · multiplayer</div>
+  </div>
+  <div class="card">
+    <span class="lbl">ชื่อของคุณ</span>
+    <input type="text" id="home-name" placeholder="ใส่ชื่อ..." maxlength="16">
+  </div>
+  <button class="btn btn-primary btn-full pulse" onclick="gotoCreate()" style="padding:14px;font-size:15px;letter-spacing:2px;margin-bottom:10px;">
+    สร้างห้องใหม่
+  </button>
+  <div class="deco"><span>หรือ</span></div>
+  <div class="card">
+    <span class="lbl">รหัสห้อง</span>
+    <input type="text" id="join-code" placeholder="เช่น AB3XZ" maxlength="5" style="text-transform:uppercase;">
+    <button class="btn btn-full" onclick="joinRoom()">เข้าร่วมห้อง →</button>
+  </div>
+  <div style="text-align:center;margin-top:1rem;">
+    <button class="btn btn-sm" onclick="showHowTo()" style="letter-spacing:1px;">วิธีเล่น (?)</button>
+  </div>
+</div>
+
+<!-- HOW TO PLAY MODAL -->
+<div id="howto-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:50;overflow-y:auto;padding:2rem 1rem;">
+  <div style="max-width:460px;margin:0 auto;background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:1.5rem;position:relative;">
+    <div style="font-family:'Bebas Neue';font-size:28px;letter-spacing:5px;color:var(--accent);margin-bottom:0.25rem;">วิธีเล่น</div>
+    <div style="font-size:11px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:1.25rem;">Undercover — เกมสายลับ</div>
+
+    <div style="background:rgba(200,169,110,0.06);border:1px solid var(--border);border-radius:2px;padding:1rem;margin-bottom:1rem;">
+      <div style="font-size:11px;letter-spacing:2px;color:var(--accent);text-transform:uppercase;margin-bottom:10px;">บทบาท</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <span class="role-tag r-citizen" style="flex-shrink:0;margin-top:2px;">พลเมือง</span>
+          <span style="font-size:13px;color:var(--muted);line-height:1.5;">ได้รับคำเหมือนกัน — พยายามหาว่าใครได้คำต่าง</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <span class="role-tag r-undercover" style="flex-shrink:0;margin-top:2px;">Undercover</span>
+          <span style="font-size:13px;color:var(--muted);line-height:1.5;">ได้คำที่ใกล้เคียงแต่ต่าง — ต้องแกล้งทำเป็นว่าตัวเองเป็นพลเมือง</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <span class="role-tag r-white" style="flex-shrink:0;margin-top:2px;">Mr. White</span>
+          <span style="font-size:13px;color:var(--muted);line-height:1.5;">ไม่ได้รับคำใดเลย — ถ้าถูกโหวตออก สามารถเดาคำพลเมืองเพื่อชนะได้</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:11px;letter-spacing:2px;color:var(--accent);text-transform:uppercase;margin-bottom:10px;">ขั้นตอนการเล่น</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:1.25rem;">
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div style="min-width:24px;height:24px;border-radius:50%;background:rgba(200,169,110,0.2);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0;">1</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.5;">Host <strong>สร้างห้อง</strong> แชร์รหัส 5 ตัวให้เพื่อน แต่ละคนเข้าร่วมจากมือถือตัวเอง</div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div style="min-width:24px;height:24px;border-radius:50%;background:rgba(200,169,110,0.2);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0;">2</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.5;">Host <strong>ใส่คู่คำลับ</strong> เช่น "แมว / สุนัข" แล้วกดเริ่มเกม</div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div style="min-width:24px;height:24px;border-radius:50%;background:rgba(200,169,110,0.2);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0;">3</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.5;">ทุกคน<strong>รับคำ</strong>ในหน้าจอตัวเอง — <span style="color:var(--accent);">ห้ามบอกคำใคร!</span></div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div style="min-width:24px;height:24px;border-radius:50%;background:rgba(200,169,110,0.2);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0;">4</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.5;">ผลัดกัน<strong>บรรยายคำ</strong>ของตัวเองสั้นๆ โดยไม่พูดคำตรงๆ — ทุกคนฟังและจำ</div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div style="min-width:24px;height:24px;border-radius:50%;background:rgba(200,169,110,0.2);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0;">5</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.5;">Host กด <strong>"เริ่มโหวต"</strong> ทุกคนเลือกคนที่สงสัย — คนโดนโหวตมากสุดถูกคัดออก</div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div style="min-width:24px;height:24px;border-radius:50%;background:rgba(200,169,110,0.2);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0;">6</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.5;">เล่นวนจนกว่าฝ่ายใดฝ่ายหนึ่งชนะ</div>
+      </div>
+    </div>
+
+    <div style="background:rgba(192,57,43,0.08);border:1px solid rgba(192,57,43,0.25);border-radius:2px;padding:1rem;margin-bottom:1.25rem;">
+      <div style="font-size:11px;letter-spacing:2px;color:var(--red);text-transform:uppercase;margin-bottom:8px;">เงื่อนไขชนะ</div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.7;">
+        🟢 <span style="color:var(--text);">พลเมืองชนะ</span> — ไล่ Undercover ทั้งหมดออกได้<br>
+        🔴 <span style="color:var(--text);">Undercover ชนะ</span> — เหลือมากกว่าหรือเท่ากับพลเมือง<br>
+        ⭐ <span style="color:var(--text);">Mr. White ชนะ</span> — โดนโหวตออกแต่เดาคำพลเมืองถูก
+      </div>
+    </div>
+
+    <div style="background:rgba(200,169,110,0.06);border:1px solid var(--border);border-radius:2px;padding:0.75rem 1rem;margin-bottom:1.25rem;">
+      <div style="font-size:11px;letter-spacing:2px;color:var(--accent);text-transform:uppercase;margin-bottom:6px;">เคล็ดลับ</div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.7;">
+        · บรรยายแบบกว้างๆ ถ้าแม่นเกินคนอื่นจะสงสัย<br>
+        · ดูทิศทางของคำบรรยายคนอื่น หาคนที่ "ออกนอกแนว"<br>
+        · Undercover: พยักหน้าตามแต่อย่าบรรยายตรงๆ
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-full" onclick="hideHowTo()">เข้าใจแล้ว!</button>
+  </div>
+</div>
+
+<!-- LOBBY (host) -->
+<div id="s-lobby" class="screen">
+  <div class="logo" style="font-size:36px;letter-spacing:5px;margin-bottom:4px;">UNDER<span>COVER</span></div>
+  <div class="deco"><span>รหัสห้อง</span></div>
+  <div class="code-display" id="lobby-code"></div>
+  <p class="center muted" style="font-size:13px;margin-bottom:1.5rem;">แชร์รหัสนี้ให้เพื่อนเข้าร่วม</p>
+
+  <div class="section-lbl">ผู้เล่นในห้อง (<span id="player-count">0</span>)</div>
+  <div id="lobby-players" style="margin-bottom:1rem;"></div>
+
+  <div id="host-setup" style="display:none;">
+    <div class="deco"><span>ตั้งค่าเกม</span></div>
+    <div class="card">
+      <span class="lbl">คู่คำลับ</span>
+      <div class="flex" style="margin-bottom:6px;">
+        <input type="password" id="w-citizen" placeholder="-" style="margin:0;flex:1;" autocomplete="off">
+        <input type="password" id="w-under" placeholder="-" style="margin:0;flex:1;" autocomplete="off">
+      </div>
+      <div class="flex" style="justify-content:space-between;align-items:center;">
+        <button class="random-btn" onclick="randomWords()">🎲 สุ่มคู่คำ</button>
+        <button class="random-btn" id="toggle-words-btn" onclick="toggleShowWords()" style="color:var(--muted);">👁 แสดงคำ</button>
+      </div>
+      <div id="words-preview" style="display:none;margin-top:8px;background:rgba(192,57,43,0.08);border:1px solid rgba(192,57,43,0.25);border-radius:2px;padding:8px 12px;font-size:13px;color:var(--muted);">
+        กรุณาซ่อนจอจากผู้เล่นคนอื่นก่อน
+      </div>
+    </div>
+    <div class="card" style="padding:0.75rem 1.25rem;">
+      <div class="check-row" onclick="toggleWhite()">
+        <div class="chk" id="white-chk"></div>
+        <div>
+          <div style="font-size:14px;">เพิ่ม Mr. White</div>
+          <div style="font-size:12px;color:var(--muted);">ผู้เล่นที่ไม่รู้คำ</div>
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="startGame()" style="padding:13px;font-size:15px;letter-spacing:1px;">
+      เริ่มเกม →
+    </button>
+  </div>
+
+  <div id="guest-wait" style="display:none;text-align:center;padding:1rem 0;">
+    <p style="color:var(--muted);font-size:13px;letter-spacing:1px;">รอ host เริ่มเกม...</p>
+  </div>
+</div>
+
+<!-- PLAYING -->
+<div id="s-playing" class="screen">
+  <div class="flex-sb" style="margin-bottom:1.5rem;">
+    <div style="font-family:'Bebas Neue';font-size:22px;letter-spacing:3px;color:var(--accent);" id="round-lbl">รอบที่ 1</div>
+    <div style="font-size:12px;color:var(--muted);" id="alive-lbl"></div>
+  </div>
+
+  <div class="card" style="text-align:center;margin-bottom:1.5rem;">
+    <span class="lbl" style="margin-bottom:4px;">คำของคุณ</span>
+    <div class="word-big" id="my-word" style="font-size:36px;"></div>
+  </div>
+
+  <div class="section-lbl">ผู้เล่นในเกม</div>
+  <div id="playing-players"></div>
+
+  <div class="mt2" id="host-vote-btn-wrap" style="display:none;">
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px;">ทุกคนบรรยายคำของตัวเองแล้วหรือยัง?</p>
+    <button class="btn btn-primary btn-full" onclick="openVote()">เริ่มโหวต →</button>
+  </div>
+  <div id="guest-wait2" style="display:none;text-align:center;margin-top:1.5rem;">
+    <p style="color:var(--muted);font-size:13px;">รอ host เริ่มโหวต...</p>
+  </div>
+</div>
+
+<!-- VOTING -->
+<div id="s-voting" class="screen">
+  <div style="font-family:'Bebas Neue';font-size:22px;letter-spacing:3px;color:var(--accent);margin-bottom:4px;" id="vote-round-lbl">รอบที่ 1 — โหวต</div>
+  <div class="vote-bar"><div class="vote-bar-fill" id="vote-prog" style="width:0%"></div></div>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:1rem;">เลือกคนที่สงสัยว่าเป็น Undercover (<span id="voted-count">0</span>/<span id="voted-total">0</span>)</p>
+
+  <div id="vote-players"></div>
+
+  <p class="center muted mt" id="already-voted" style="font-size:13px;display:none;">คุณโหวตแล้ว — รอคนอื่น...</p>
+</div>
+
+<!-- RESULT (elimination) -->
+<div id="s-result" class="screen">
+  <div class="deco"><span>ผลการโหวต</span></div>
+  <div style="background:var(--bg3);border:1px solid var(--border);padding:2rem;text-align:center;margin-bottom:1rem;position:relative;">
+    <div id="elim-av" class="av" style="width:56px;height:56px;font-size:20px;margin:0 auto 1rem;"></div>
+    <div style="font-family:'Bebas Neue';font-size:38px;letter-spacing:4px;" id="elim-name"></div>
+    <div style="margin:0.5rem 0;" id="elim-role"></div>
+    <div style="font-size:13px;color:var(--muted);margin-top:1rem;">คำของเขา/เธอ</div>
+    <div style="font-size:26px;font-weight:600;color:var(--accent);margin-top:4px;" id="elim-word"></div>
+  </div>
+
+  <div id="white-guess-wrap" style="display:none;" class="card">
+    <span class="lbl">Mr. White — เดาคำพลเมือง</span>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:8px;">ถ้าถูก Mr. White ชนะทันที!</p>
+    <div class="flex">
+      <input type="text" id="wg-input" placeholder="พิมพ์คำที่เดา..." style="margin:0;flex:1;">
+      <button class="btn btn-sm btn-primary" onclick="submitWhiteGuess()">ตรวจ</button>
+    </div>
+  </div>
+
+  <div id="result-actions" class="mt"></div>
+</div>
+
+<!-- END -->
+<div id="s-end" class="screen">
+  <div style="padding-top:1.5rem;text-align:center;">
+    <div style="font-size:56px;margin-bottom:0.5rem;" id="end-icon"></div>
+    <div class="end-title" id="end-title"></div>
+    <p style="color:var(--muted);font-size:14px;margin-top:4px;" id="end-sub"></p>
+  </div>
+  <div class="deco mt2"><span>คำลับ</span></div>
+  <div class="flex" style="margin-bottom:1.5rem;gap:8px;">
+    <div class="word-pill"><div class="wlbl">พลเมือง</div><div class="wval" id="end-wc" style="color:#4eca8a;"></div></div>
+    <div class="word-pill"><div class="wlbl">undercover</div><div class="wval" id="end-wu" style="color:#e07060;"></div></div>
+  </div>
+  <div class="section-lbl">ตัวตนทุกคน</div>
+  <div id="end-players" style="margin-bottom:1.5rem;"></div>
+  <div id="end-actions"></div>
+</div>
+
+<script>
+const WORD_PAIRS = [
+  ['ส้มตำ','ลาบ'],['พิซซ่า','พาย'],['เบียร์','ไวน์'],['สิงโต','เสือโคร่ง'],
+  ['ดาบ','หอก'],['แมว','กระรอก'],['ฟุตบอล','รักบี้'],['ชา','กาแฟ'],
+  ['รถยนต์','มอเตอร์ไซค์'],['ทะเล','ทะเลสาบ'],['ภูเขา','เนินเขา'],
+  ['โทรศัพท์','แท็บเล็ต'],['หนังสือ','นิตยสาร'],['บ้าน','อพาร์ตเมนต์'],
+  ['ข้าวผัด','ผัดไทย'],['ว่ายน้ำ','ดำน้ำ'],['แอปเปิ้ล','ลูกแพร์'],
+  ['กางเกงยีนส์','กางเกงขายาว'],['ช็อกโกแลต','คาราเมล'],
+  ['ตลาด','ห้างสรรพสินค้า'],['ครู','อาจารย์'],['หมา','หมาป่า'],
+  ['เปียโน','กีตาร์'],['นักแสดง','นักร้อง'],['รองเท้าผ้าใบ','รองเท้าแตะ'],
+];
+const AV_COLORS = [
+  {bg:'rgba(83,74,183,0.3)',c:'#9890dd'},{bg:'rgba(26,122,74,0.3)',c:'#4eca8a'},
+  {bg:'rgba(192,57,43,0.3)',c:'#e07060'},{bg:'rgba(200,169,110,0.2)',c:'#c8a96e'},
+  {bg:'rgba(44,100,150,0.3)',c:'#60aacc'},{bg:'rgba(130,80,140,0.3)',c:'#cc88dd'},
+  {bg:'rgba(160,110,40,0.3)',c:'#ddaa44'},{bg:'rgba(50,130,120,0.3)',c:'#44ccbb'},
+];
+
+function showHowTo() { document.getElementById('howto-overlay').style.display = 'block'; document.body.style.overflow = 'hidden'; }
+function hideHowTo() { document.getElementById('howto-overlay').style.display = 'none'; document.body.style.overflow = ''; }
+
+const socket = io();
+let myId = socket.id;
+let myName = '';
+let myRoom = '';
+let isHost = false;
+let myRole = null;
+let myWord = '';
+let hasWhiteOn = false;
+let currentPlayers = [];
+let currentRound = 1;
+let hasVoted = false;
+let elimIsWhite = false;
+let elimIsMe = false;
+
+socket.on('connect', () => { myId = socket.id; });
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0,0);
+}
+
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2800);
+}
+
+function avColor(index) { return AV_COLORS[index % AV_COLORS.length]; }
+
+function renderPlayers(players, containerId, opts = {}) {
+  const cont = document.getElementById(containerId);
+  cont.innerHTML = '';
+  players.forEach((p, i) => {
+    const av = avColor(i);
+    const div = document.createElement('div');
+    div.className = 'player-row' + (!p.alive ? ' eliminated' : '') + (opts.selectable && p.alive && p.id !== myId ? ' selectable' : '');
+    if (opts.selectable && p.alive && p.id !== myId) div.onclick = () => opts.onSelect(p.id);
+    if (opts.selected === p.id) div.classList.add('vote-on');
+    const voteBadge = opts.votes && opts.votes[p.id] ? `<span class="badge badge-red">${opts.votes[p.id]} โหวต</span>` : '';
+    const hostBadge = p.isHost ? `<span style="font-size:10px;color:var(--accent);">HOST</span>` : '';
+    const elimBadge = !p.alive ? `<span style="font-size:10px;color:var(--red);letter-spacing:1px;">OUT</span>` : '';
+    const youBadge = p.id === myId ? `<span style="font-size:10px;color:var(--muted);">(คุณ)</span>` : '';
+    div.innerHTML = `
+      <div class="flex">
+        <div class="av" style="background:${av.bg};color:${av.c};">${p.name[0]}</div>
+        <span style="font-size:15px;">${p.name}</span>
+        ${youBadge}${hostBadge}
+      </div>
+      <div class="flex" style="gap:6px;">${voteBadge}${elimBadge}</div>
+    `;
+    cont.appendChild(div);
+  });
+}
+
+// ===== HOME =====
+function gotoCreate() {
+  const name = document.getElementById('home-name').value.trim();
+  if (!name) { toast('กรุณาใส่ชื่อก่อน'); return; }
+  myName = name;
+  isHost = true;
+  socket.emit('create-room', { name });
+}
+
+function joinRoom() {
+  const name = document.getElementById('home-name').value.trim();
+  const code = document.getElementById('join-code').value.trim().toUpperCase();
+  if (!name) { toast('กรุณาใส่ชื่อก่อน'); return; }
+  if (!code) { toast('กรุณาใส่รหัสห้อง'); return; }
+  myName = name;
+  isHost = false;
+  socket.emit('join-room', { code, name });
+}
+
+socket.on('room-joined', ({ code, playerId }) => {
+  myId = playerId;
+  myRoom = code;
+  document.getElementById('lobby-code').textContent = code;
+  document.getElementById('host-setup').style.display = isHost ? 'block' : 'none';
+  document.getElementById('guest-wait').style.display = isHost ? 'none' : 'block';
+  showScreen('s-lobby');
+});
+
+socket.on('players-update', (players) => {
+  currentPlayers = players;
+  document.getElementById('player-count').textContent = players.length;
+  renderPlayers(players, 'lobby-players');
+  if (document.getElementById('s-playing').classList.contains('active')) {
+    renderPlayers(players, 'playing-players');
+  }
+});
+
+socket.on('player-left', ({ name }) => { toast(`${name} ออกจากห้อง`); });
+socket.on('error', (msg) => { toast('⚠ ' + msg); });
+
+// ===== LOBBY HOST =====
+let wordsVisible = false;
+function randomWords() {
+  const pair = WORD_PAIRS[Math.floor(Math.random() * WORD_PAIRS.length)];
+  document.getElementById('w-citizen').value = pair[0];
+  document.getElementById('w-under').value = pair[1];
+  // hide after random
+  wordsVisible = false;
+  document.getElementById('w-citizen').type = 'password';
+  document.getElementById('w-under').type = 'password';
+  document.getElementById('toggle-words-btn').textContent = '👁 แสดงคำ';
+  const preview = document.getElementById('words-preview');
+  preview.style.display = 'none';
+  preview.textContent = 'กรุณาซ่อนจอจากผู้เล่นคนอื่นก่อน';
+  toast('สุ่มคู่คำแล้ว — กด "แสดงคำ" เพื่อดู');
+}
+function toggleShowWords() {
+  wordsVisible = !wordsVisible;
+  const ci = document.getElementById('w-citizen');
+  const wu = document.getElementById('w-under');
+  const btn = document.getElementById('toggle-words-btn');
+  const preview = document.getElementById('words-preview');
+  if (wordsVisible) {
+    ci.type = 'text';
+    wu.type = 'text';
+    btn.textContent = '🙈 ซ่อนคำ';
+    btn.style.color = 'var(--accent)';
+    preview.style.display = 'block';
+    const wc = ci.value.trim();
+    const wunder = wu.value.trim();
+    if (wc || wunder) {
+      preview.style.color = 'var(--text)';
+      preview.textContent = (wc || '?') + '  /  ' + (wunder || '?');
+    } else {
+      preview.style.color = 'var(--muted)';
+      preview.textContent = 'ยังไม่ได้ใส่คำ';
+    }
+  } else {
+    ci.type = 'password';
+    wu.type = 'password';
+    btn.textContent = '👁 แสดงคำ';
+    btn.style.color = 'var(--muted)';
+    preview.style.display = 'none';
+  }
+}
+function toggleWhite() {
+  hasWhiteOn = !hasWhiteOn;
+  const el = document.getElementById('white-chk');
+  if (hasWhiteOn) el.classList.add('on'); else el.classList.remove('on');
+}
+function startGame() {
+  const wc = document.getElementById('w-citizen').value.trim();
+  const wu = document.getElementById('w-under').value.trim();
+  socket.emit('start-game', { wordCitizen: wc, wordUnder: wu, hasWhite: hasWhiteOn });
+}
+
+socket.on('game-started', ({ round }) => {
+  currentRound = round;
+  showScreen('s-playing');
+  document.getElementById('round-lbl').textContent = `รอบที่ ${round}`;
+  document.getElementById('host-vote-btn-wrap').style.display = isHost ? 'block' : 'none';
+  document.getElementById('guest-wait2').style.display = isHost ? 'none' : 'block';
+});
+
+socket.on('your-role', ({ role, word }) => {
+  myRole = role;
+  myWord = word;
+  const wordEl = document.getElementById('my-word');
+  wordEl.textContent = role === 'white' ? '?' : word;
+  renderPlayers(currentPlayers, 'playing-players');
+  const aliveCnt = currentPlayers.filter(p => p.alive).length;
+  document.getElementById('alive-lbl').textContent = `${aliveCnt} คนยังอยู่`;
+});
+
+function openVote() { socket.emit('open-vote'); }
+
+// ===== VOTING =====
+let selectedVote = null;
+
+socket.on('voting-started', () => {
+  hasVoted = false;
+  selectedVote = null;
+  document.getElementById('vote-round-lbl').textContent = `รอบที่ ${currentRound} — โหวต`;
+  const alive = currentPlayers.filter(p => p.alive);
+  document.getElementById('voted-total').textContent = alive.length;
+  document.getElementById('voted-count').textContent = 0;
+  document.getElementById('vote-prog').style.width = '0%';
+  document.getElementById('already-voted').style.display = 'none';
+  renderVotePlayers({});
+  showScreen('s-voting');
+});
+
+function renderVotePlayers(votes) {
+  const alive = currentPlayers.filter(p => p.alive);
+  renderPlayers(alive, 'vote-players', {
+    selectable: !hasVoted,
+    selected: selectedVote,
+    votes,
+    onSelect: (pid) => {
+      if (hasVoted) return;
+      selectedVote = pid;
+      socket.emit('cast-vote', { targetId: pid });
+      hasVoted = true;
+      document.getElementById('already-voted').style.display = 'block';
+      renderVotePlayers(votes);
+    }
+  });
+}
+
+socket.on('vote-update', ({ votes, votedCount, total }) => {
+  document.getElementById('voted-count').textContent = votedCount;
+  document.getElementById('vote-prog').style.width = Math.round((votedCount/total)*100) + '%';
+  renderVotePlayers(votes);
+});
+
+// ===== ELIMINATION =====
+socket.on('elimination-result', ({ eliminated, votes }) => {
+  showScreen('s-result');
+  const idx = currentPlayers.findIndex(p => p.id === eliminated.id);
+  const av = avColor(idx >= 0 ? idx : 0);
+  const avEl = document.getElementById('elim-av');
+  avEl.textContent = eliminated.name[0];
+  avEl.style.background = av.bg; avEl.style.color = av.c;
+  document.getElementById('elim-name').textContent = eliminated.name;
+  document.getElementById('elim-word').textContent = eliminated.role === 'white' ? '(ไม่มีคำ)' : eliminated.word;
+
+  document.getElementById('elim-role').innerHTML = '';
+
+  elimIsWhite = eliminated.role === 'white';
+  elimIsMe = eliminated.id === myId;
+
+  document.getElementById('white-guess-wrap').style.display = 'none';
+  document.getElementById('result-actions').innerHTML = '';
+});
+
+socket.on('white-must-guess', ({ name }) => {
+  if (elimIsMe) {
+    document.getElementById('white-guess-wrap').style.display = 'block';
+    document.getElementById('wg-input').value = '';
+  } else {
+    document.getElementById('result-actions').innerHTML = `<p class="center muted" style="font-size:13px;">รอ ${name} เดาคำ...</p>`;
+  }
+});
+
+socket.on('white-guess-wrong', () => {
+  toast('Mr. White เดาผิด!');
+  document.getElementById('white-guess-wrap').style.display = 'none';
+});
+
+function submitWhiteGuess() {
+  const g = document.getElementById('wg-input').value.trim();
+  if (!g) return;
+  socket.emit('white-guess', { guess: g });
+}
+
+socket.on('next-round', ({ round }) => {
+  currentRound = round;
+  hasVoted = false;
+  document.getElementById('round-lbl').textContent = `รอบที่ ${round}`;
+  const aliveCnt = currentPlayers.filter(p => p.alive).length;
+  document.getElementById('alive-lbl').textContent = `${aliveCnt} คนยังอยู่`;
+  renderPlayers(currentPlayers, 'playing-players');
+  showScreen('s-playing');
+  document.getElementById('host-vote-btn-wrap').style.display = isHost ? 'block' : 'none';
+  document.getElementById('guest-wait2').style.display = isHost ? 'none' : 'block';
+});
+
+// ===== END =====
+socket.on('game-end', ({ winner, wordCitizen, wordUnder, players }) => {
+  const cfg = {
+    citizen: { icon:'🎉', title:'พลเมืองชนะ!', cls:'c-citizen', sub:'Undercover ถูกจับได้แล้ว' },
+    undercover: { icon:'🕵️', title:'Undercover ชนะ!', cls:'c-under', sub:'สายลับรอดพ้นได้สำเร็จ' },
+    white: { icon:'⭐', title:'Mr. White ชนะ!', cls:'c-white', sub:'Mr. White เดาคำพลเมืองถูก!' },
+  }[winner];
+  document.getElementById('end-icon').textContent = cfg.icon;
+  const titleEl = document.getElementById('end-title');
+  titleEl.textContent = cfg.title; titleEl.className = 'end-title ' + cfg.cls;
+  document.getElementById('end-sub').textContent = cfg.sub;
+  document.getElementById('end-wc').textContent = wordCitizen;
+  document.getElementById('end-wu').textContent = wordUnder;
+
+  const cont = document.getElementById('end-players');
+  cont.innerHTML = '';
+  players.forEach((p, i) => {
+    const av = avColor(i);
+    const div = document.createElement('div');
+    div.className = 'player-row';
+    let rtag = '';
+    if (p.role === 'undercover') rtag = '<span class="role-tag r-undercover" style="font-size:10px;">Undercover</span>';
+    else if (p.role === 'white') rtag = '<span class="role-tag r-white" style="font-size:10px;">Mr. White</span>';
+    else rtag = '<span class="role-tag r-citizen" style="font-size:10px;">พลเมือง</span>';
+    div.innerHTML = `
+      <div class="flex">
+        <div class="av" style="width:28px;height:28px;font-size:12px;background:${av.bg};color:${av.c};">${p.name[0]}</div>
+        <span style="font-size:14px;">${p.name}</span>
+      </div>
+      <div class="flex" style="gap:6px;">
+        ${rtag}
+        <span style="font-size:13px;color:var(--muted);">${p.role !== 'white' ? p.word : '—'}</span>
+      </div>`;
+    cont.appendChild(div);
+  });
+
+  const actions = document.getElementById('end-actions');
+  if (isHost) {
+    actions.innerHTML = `<button class="btn btn-primary btn-full" onclick="playAgain()" style="padding:13px;font-size:15px;">เล่นรอบใหม่</button>`;
+  } else {
+    actions.innerHTML = `<p class="center muted" style="font-size:13px;">รอ host เริ่มรอบใหม่...</p>`;
+  }
+
+  showScreen('s-end');
+});
+
+function playAgain() { socket.emit('play-again'); }
+
+socket.on('back-to-lobby', () => {
+  myRole = null; myWord = '';
+  document.getElementById('host-setup').style.display = isHost ? 'block' : 'none';
+  document.getElementById('guest-wait').style.display = isHost ? 'none' : 'block';
+  showScreen('s-lobby');
+});
+</script>
+</body>
+</html>

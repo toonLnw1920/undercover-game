@@ -1,0 +1,252 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+// rooms: { roomCode: { players, host, state, ... } }
+const rooms = {};
+
+const WORD_PAIRS = [
+  ['ส้มตำ','ลาบ'],['พิซซ่า','พาย'],['เบียร์','ไวน์'],['สิงโต','เสือโคร่ง'],
+  ['ดาบ','หอก'],['แมว','กระรอก'],['ฟุตบอล','รักบี้'],['ชา','กาแฟ'],
+  ['รถยนต์','มอเตอร์ไซค์'],['ทะเล','ทะเลสาบ'],['ภูเขา','เนินเขา'],
+  ['โทรศัพท์','แท็บเล็ต'],['หนังสือ','นิตยสาร'],['บ้าน','อพาร์ตเมนต์'],
+  ['ข้าวผัด','ผัดไทย'],['ว่ายน้ำ','ดำน้ำ'],['แอปเปิ้ล','ลูกแพร์'],
+  ['กางเกงยีนส์','กางเกงขายาว'],['ช็อกโกแลต','คาราเมล'],['วันเกิด','วันแต่งงาน'],
+  ['ตลาด','ห้างสรรพสินค้า'],['ครู','อาจารย์'],['หมา','หมาป่า'],['เปียโน','กีตาร์'],
+  ['นักแสดง','นักร้อง'],['ลิปสติก','ลิปกลอส'],['รองเท้าผ้าใบ','รองเท้าแตะ'],
+];
+
+function makeCode() {
+  return Math.random().toString(36).substring(2,7).toUpperCase();
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length-1; i > 0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+function getRoom(code) { return rooms[code]; }
+
+function publicPlayers(room) {
+  return room.players.map(p => ({
+    id: p.id,
+    name: p.name,
+    alive: p.alive,
+    isHost: p.isHost,
+  }));
+}
+
+io.on('connection', (socket) => {
+
+  // Create room
+  socket.on('create-room', ({ name }) => {
+    const code = makeCode();
+    const player = { id: socket.id, name, alive: true, isHost: true, role: null, word: null };
+    rooms[code] = {
+      code,
+      host: socket.id,
+      players: [player],
+      phase: 'lobby', // lobby | playing | voting | result | end
+      wordCitizen: '',
+      wordUnder: '',
+      hasWhite: false,
+      round: 1,
+      votes: {},
+      eliminated: [],
+    };
+    socket.join(code);
+    socket.data.room = code;
+    socket.data.name = name;
+    socket.emit('room-joined', { code, playerId: socket.id });
+    io.to(code).emit('players-update', publicPlayers(rooms[code]));
+  });
+
+  // Join room
+  socket.on('join-room', ({ code, name }) => {
+    const room = getRoom(code);
+    if (!room) { socket.emit('error', 'ไม่พบห้องนี้'); return; }
+    if (room.phase !== 'lobby') { socket.emit('error', 'เกมเริ่มไปแล้ว'); return; }
+    if (room.players.length >= 12) { socket.emit('error', 'ห้องเต็มแล้ว (12 คน)'); return; }
+    const player = { id: socket.id, name, alive: true, isHost: false, role: null, word: null };
+    room.players.push(player);
+    socket.join(code);
+    socket.data.room = code;
+    socket.data.name = name;
+    socket.emit('room-joined', { code, playerId: socket.id });
+    io.to(code).emit('players-update', publicPlayers(room));
+  });
+
+  // Start game (host only)
+  socket.on('start-game', ({ wordCitizen, wordUnder, hasWhite }) => {
+    const code = socket.data.room;
+    const room = getRoom(code);
+    if (!room || room.host !== socket.id) return;
+    if (room.players.length < 3) { socket.emit('error', 'ต้องมีผู้เล่นอย่างน้อย 3 คน'); return; }
+    if (!wordCitizen || !wordUnder) { socket.emit('error', 'กรุณาใส่คู่คำลับ'); return; }
+
+    room.wordCitizen = wordCitizen;
+    room.wordUnder = wordUnder;
+    room.hasWhite = hasWhite;
+    room.phase = 'playing';
+    room.round = 1;
+    room.votes = {};
+    room.eliminated = [];
+
+    // Assign roles
+    const n = room.players.length;
+    const underCount = n >= 7 ? 2 : 1;
+    const indices = shuffle([...Array(n).keys()]);
+    room.players.forEach(p => { p.role = 'citizen'; p.word = wordCitizen; p.alive = true; });
+    for (let i = 0; i < underCount; i++) { room.players[indices[i]].role = 'undercover'; room.players[indices[i]].word = wordUnder; }
+    if (hasWhite && n >= 5) { room.players[indices[underCount]].role = 'white'; room.players[indices[underCount]].word = ''; }
+
+    // Send each player their own role/word privately
+    room.players.forEach(p => {
+      io.to(p.id).emit('your-role', { role: p.role, word: p.word });
+    });
+
+    io.to(code).emit('game-started', { round: room.round });
+    io.to(code).emit('players-update', publicPlayers(room));
+  });
+
+  // Open voting
+  socket.on('open-vote', () => {
+    const code = socket.data.room;
+    const room = getRoom(code);
+    if (!room || room.host !== socket.id) return;
+    room.phase = 'voting';
+    room.votes = {};
+    room.players.forEach(p => { if (p.alive) p.voted = false; });
+    io.to(code).emit('voting-started');
+  });
+
+  // Cast vote
+  socket.on('cast-vote', ({ targetId }) => {
+    const code = socket.data.room;
+    const room = getRoom(code);
+    if (!room || room.phase !== 'voting') return;
+    const voter = room.players.find(p => p.id === socket.id);
+    if (!voter || !voter.alive || voter.voted) return;
+    voter.voted = true;
+    room.votes[targetId] = (room.votes[targetId] || 0) + 1;
+
+    const alivePlayers = room.players.filter(p => p.alive);
+    const votedCount = alivePlayers.filter(p => p.voted).length;
+    io.to(code).emit('vote-update', { votes: room.votes, votedCount, total: alivePlayers.length });
+
+    // All voted → auto-resolve
+    if (votedCount === alivePlayers.length) {
+      resolveVote(room, code);
+    }
+  });
+
+  // White guess
+  socket.on('white-guess', ({ guess }) => {
+    const code = socket.data.room;
+    const room = getRoom(code);
+    if (!room) return;
+    const correct = guess.trim().toLowerCase() === room.wordCitizen.toLowerCase();
+    if (correct) {
+      io.to(code).emit('game-end', { winner: 'white', wordCitizen: room.wordCitizen, wordUnder: room.wordUnder, players: room.players.map(p => ({ name: p.name, role: p.role, word: p.word })) });
+    } else {
+      io.to(code).emit('white-guess-wrong');
+      const win = checkWin(room);
+      if (win) {
+        io.to(code).emit('game-end', { winner: win, wordCitizen: room.wordCitizen, wordUnder: room.wordUnder, players: room.players.map(p => ({ name: p.name, role: p.role, word: p.word })) });
+      } else {
+        room.round++;
+        room.phase = 'playing';
+        io.to(code).emit('next-round', { round: room.round });
+        io.to(code).emit('players-update', publicPlayers(room));
+      }
+    }
+  });
+
+  // Next round (host)
+  socket.on('next-round', () => {
+    const code = socket.data.room;
+    const room = getRoom(code);
+    if (!room || room.host !== socket.id) return;
+    room.round++;
+    room.phase = 'playing';
+    io.to(code).emit('next-round', { round: room.round });
+    io.to(code).emit('players-update', publicPlayers(room));
+  });
+
+  // Play again (host)
+  socket.on('play-again', () => {
+    const code = socket.data.room;
+    const room = getRoom(code);
+    if (!room || room.host !== socket.id) return;
+    room.phase = 'lobby';
+    room.players.forEach(p => { p.role = null; p.word = null; p.alive = true; });
+    io.to(code).emit('back-to-lobby');
+    io.to(code).emit('players-update', publicPlayers(room));
+  });
+
+  socket.on('disconnect', () => {
+    const code = socket.data.room;
+    if (!code) return;
+    const room = getRoom(code);
+    if (!room) return;
+    room.players = room.players.filter(p => p.id !== socket.id);
+    if (room.players.length === 0) { delete rooms[code]; return; }
+    if (room.host === socket.id && room.players.length > 0) {
+      room.host = room.players[0].id;
+      room.players[0].isHost = true;
+    }
+    io.to(code).emit('players-update', publicPlayers(room));
+    io.to(code).emit('player-left', { name: socket.data.name });
+  });
+});
+
+function resolveVote(room, code) {
+  const votes = room.votes;
+  const alive = room.players.filter(p => p.alive);
+  const maxV = Math.max(...alive.map(p => votes[p.id] || 0));
+  const candidates = alive.filter(p => (votes[p.id] || 0) === maxV);
+  const elim = candidates[Math.floor(Math.random() * candidates.length)];
+  elim.alive = false;
+  room.eliminated.push(elim.id);
+  room.phase = 'result';
+
+  io.to(code).emit('elimination-result', {
+    eliminated: { id: elim.id, name: elim.name, role: elim.role, word: elim.word },
+    votes: room.votes,
+  });
+  io.to(code).emit('players-update', publicPlayers(room));
+
+  if (elim.role === 'white') {
+    io.to(code).emit('white-must-guess', { name: elim.name });
+  } else {
+    const win = checkWin(room);
+    if (win) {
+      io.to(code).emit('game-end', { winner: win, wordCitizen: room.wordCitizen, wordUnder: room.wordUnder, players: room.players.map(p => ({ name: p.name, role: p.role, word: p.word })) });
+    }
+  }
+}
+
+function checkWin(room) {
+  const alive = room.players.filter(p => p.alive);
+  const under = alive.filter(p => p.role === 'undercover');
+  const citizen = alive.filter(p => p.role === 'citizen');
+  const white = alive.filter(p => p.role === 'white');
+  if (under.length === 0 && white.length === 0) return 'citizen';
+  if (under.length >= citizen.length) return 'undercover';
+  if (alive.length <= 3 && under.length > 0) return 'undercover';
+  return null;
+}
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Undercover server running on http://localhost:${PORT}`));
