@@ -143,7 +143,7 @@ io.on('connection', (socket) => {
       io.to(p.id).emit('your-role', { role: p.role, word: p.word });
     });
 
-    io.to(code).emit('game-started', { round: room.round });
+    io.to(code).emit('game-started', { round: room.round, turnOrder: room.players.map(p => p.id) });
     io.to(code).emit('players-update', publicPlayers(room));
   });
 
@@ -194,7 +194,9 @@ io.on('connection', (socket) => {
       } else {
         room.round++;
         room.phase = 'playing';
-        io.to(code).emit('next-round', { round: room.round });
+        const alivePlayers = room.players.filter(p => p.alive);
+        const turnOrder = shuffle(alivePlayers.map(p => p.id));
+        io.to(code).emit('next-round', { round: room.round, turnOrder });
         io.to(code).emit('players-update', publicPlayers(room));
       }
     }
@@ -207,7 +209,9 @@ io.on('connection', (socket) => {
     if (!room || room.host !== socket.id) return;
     room.round++;
     room.phase = 'playing';
-    io.to(code).emit('next-round', { round: room.round });
+    const alivePlayers = room.players.filter(p => p.alive);
+    const turnOrder = shuffle(alivePlayers.map(p => p.id));
+    io.to(code).emit('next-round', { round: room.round, turnOrder });
     io.to(code).emit('players-update', publicPlayers(room));
   });
 

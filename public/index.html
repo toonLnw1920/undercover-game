@@ -408,6 +408,7 @@ let hasWhiteOn = false;
 let underCountVal = 1;
 let currentPlayers = [];
 let currentRound = 1;
+let currentTurnOrder = [];
 let hasVoted = false;
 let elimIsWhite = false;
 let elimIsMe = false;
@@ -580,8 +581,9 @@ function startGame() {
   socket.emit('start-game', { wordCitizen: wc, wordUnder: wu, hasWhite: hasWhiteOn, underCount: underCountVal });
 }
 
-socket.on('game-started', ({ round }) => {
+socket.on('game-started', ({ round, turnOrder }) => {
   currentRound = round;
+  if (turnOrder) currentTurnOrder = turnOrder;
   showScreen('s-playing');
   document.getElementById('round-lbl').textContent = `รอบที่ ${round}`;
   document.getElementById('host-vote-btn-wrap').style.display = isHost ? 'block' : 'none';
@@ -593,7 +595,7 @@ socket.on('your-role', ({ role, word }) => {
   myWord = word;
   const wordEl = document.getElementById('my-word');
   wordEl.textContent = role === 'white' ? '?' : word;
-  renderPlayers(currentPlayers, 'playing-players');
+  renderPlayingPlayers();
   const aliveCnt = currentPlayers.filter(p => p.alive).length;
   document.getElementById('alive-lbl').textContent = `${aliveCnt} คนยังอยู่`;
 });
@@ -650,17 +652,15 @@ socket.on('elimination-result', ({ eliminated, votes }) => {
   document.getElementById('elim-name').textContent = eliminated.name;
   document.getElementById('elim-word').textContent = eliminated.role === 'white' ? '(ไม่มีคำ)' : eliminated.word;
 
-  // แสดง role เฉพาะ host
+  // แสดง role ให้ทุกคนเห็น
   const roleEl = document.getElementById('elim-role');
-  if (isHost) {
-    let roleTag = '';
-    if (eliminated.role === 'undercover') roleTag = '<span class="role-tag r-undercover">Undercover</span>';
-    else if (eliminated.role === 'white') roleTag = '<span class="role-tag r-white">Mr. White</span>';
-    else roleTag = '<span class="role-tag r-citizen">พลเมือง</span>';
-    roleEl.innerHTML = roleTag;
-  } else {
-    roleEl.innerHTML = '';
-  }
+  let roleTag = '';
+  if (eliminated.role === 'undercover') roleTag = '<span class="role-tag r-undercover">Undercover</span>';
+  else if (eliminated.role === 'white') roleTag = '<span class="role-tag r-white">Mr. White</span>';
+  else roleTag = '<span class="role-tag r-citizen">พลเมือง</span>';
+  // แสดง vote count ด้วย
+  const elimVotes = votes[eliminated.id] || 0;
+  roleEl.innerHTML = roleTag + `<span style="font-size:13px;color:var(--muted);margin-left:8px;">(${elimVotes} โหวต)</span>`;
 
   // ซ่อนคำสำหรับทุกคน (ยกเว้นโชว์ตอนจบเกม)
   document.getElementById('elim-word-wrap').style.display = 'none';
@@ -704,13 +704,14 @@ function submitWhiteGuess() {
   socket.emit('white-guess', { guess: g });
 }
 
-socket.on('next-round', ({ round }) => {
+socket.on('next-round', ({ round, turnOrder }) => {
   currentRound = round;
+  if (turnOrder) currentTurnOrder = turnOrder;
   hasVoted = false;
   document.getElementById('round-lbl').textContent = `รอบที่ ${round}`;
   const aliveCnt = currentPlayers.filter(p => p.alive).length;
   document.getElementById('alive-lbl').textContent = `${aliveCnt} คนยังอยู่`;
-  renderPlayers(currentPlayers, 'playing-players');
+  renderPlayingPlayers();
   showScreen('s-playing');
   document.getElementById('host-vote-btn-wrap').style.display = isHost ? 'block' : 'none';
   document.getElementById('guest-wait2').style.display = isHost ? 'none' : 'block';
@@ -762,6 +763,23 @@ socket.on('game-end', ({ winner, wordCitizen, wordUnder, players }) => {
   showScreen('s-end');
 });
 
+function renderPlayingPlayers() {
+  // เรียงผู้เล่นที่ยังมีชีวิตตาม turnOrder, ที่ตายแล้วไว้ท้าย
+  const alive = currentPlayers.filter(p => p.alive);
+  const dead = currentPlayers.filter(p => !p.alive);
+  let ordered = [];
+  if (currentTurnOrder.length > 0) {
+    currentTurnOrder.forEach(id => {
+      const p = alive.find(p => p.id === id);
+      if (p) ordered.push(p);
+    });
+    // เผื่อมีคนที่ไม่อยู่ใน turnOrder
+    alive.forEach(p => { if (!ordered.find(o => o.id === p.id)) ordered.push(p); });
+  } else {
+    ordered = alive;
+  }
+  renderPlayers([...ordered, ...dead], 'playing-players');
+}
 function goNextRound() { socket.emit('next-round'); }
 function playAgain() { socket.emit('play-again'); }
 
