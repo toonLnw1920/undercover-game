@@ -88,11 +88,12 @@ io.on('connection', (socket) => {
   });
 
   // Start game (host only)
-  socket.on('start-game', ({ wordCitizen, wordUnder, hasWhite }) => {
+  socket.on('start-game', ({ wordCitizen, wordUnder, hasWhite, underCount }) => {
     const code = socket.data.room;
     const room = getRoom(code);
     if (!room || room.host !== socket.id) return;
     if (room.players.length < 3) { socket.emit('error', 'ต้องมีผู้เล่นอย่างน้อย 3 คน'); return; }
+    if (hasWhite && room.players.length < 4) { socket.emit('error', 'ต้องมีผู้เล่นอย่างน้อย 4 คน เมื่อใช้ Mr. White'); return; }
     if (!wordCitizen || !wordUnder) { socket.emit('error', 'กรุณาใส่คู่คำลับ'); return; }
 
     room.wordCitizen = wordCitizen;
@@ -105,11 +106,13 @@ io.on('connection', (socket) => {
 
     // Assign roles
     const n = room.players.length;
-    const underCount = n >= 7 ? 2 : 1;
+    const slots = n - (hasWhite ? 1 : 0);
+    const maxUnder = Math.max(1, Math.floor((slots - 1) / 2));
+    const resolvedUnderCount = Math.min(Math.max(1, underCount || 1), maxUnder);
     const indices = shuffle([...Array(n).keys()]);
     room.players.forEach(p => { p.role = 'citizen'; p.word = wordCitizen; p.alive = true; });
-    for (let i = 0; i < underCount; i++) { room.players[indices[i]].role = 'undercover'; room.players[indices[i]].word = wordUnder; }
-    if (hasWhite && n >= 5) { room.players[indices[underCount]].role = 'white'; room.players[indices[underCount]].word = ''; }
+    for (let i = 0; i < resolvedUnderCount; i++) { room.players[indices[i]].role = 'undercover'; room.players[indices[i]].word = wordUnder; }
+    if (hasWhite) { room.players[indices[resolvedUnderCount]].role = 'white'; room.players[indices[resolvedUnderCount]].word = ''; }
 
     // Send each player their own role/word privately
     room.players.forEach(p => {
@@ -242,9 +245,10 @@ function checkWin(room) {
   const under = alive.filter(p => p.role === 'undercover');
   const citizen = alive.filter(p => p.role === 'citizen');
   const white = alive.filter(p => p.role === 'white');
+  // พลเมืองชนะ: ไม่เหลือ undercover และ mr.white
   if (under.length === 0 && white.length === 0) return 'citizen';
+  // Undercover ชนะ: จำนวน undercover >= จำนวน citizen (1vs1, 2vs2, ...)
   if (under.length >= citizen.length) return 'undercover';
-  if (alive.length <= 3 && under.length > 0) return 'undercover';
   return null;
 }
 

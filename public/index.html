@@ -232,8 +232,8 @@
     <div class="card">
       <span class="lbl">คู่คำลับ</span>
       <div class="flex" style="margin-bottom:6px;">
-        <input type="password" id="w-citizen" placeholder="..." style="margin:0;flex:1;" autocomplete="off">
-        <input type="password" id="w-under" placeholder="..." style="margin:0;flex:1;" autocomplete="off">
+        <input type="text" id="w-citizen" placeholder="คำพลเมือง" style="margin:0;flex:1;filter:blur(4px);transition:filter 0.2s;" autocomplete="off">
+        <input type="text" id="w-under" placeholder="คำ Undercover" style="margin:0;flex:1;filter:blur(4px);transition:filter 0.2s;" autocomplete="off">
       </div>
       <div class="flex" style="justify-content:space-between;align-items:center;">
         <button class="random-btn" onclick="randomWords()">🎲 สุ่มคู่คำ</button>
@@ -244,11 +244,24 @@
       </div>
     </div>
     <div class="card" style="padding:0.75rem 1.25rem;">
-      <div class="check-row" onclick="toggleWhite()">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-size:14px;">จำนวน Undercover</div>
+          <div style="font-size:12px;color:var(--muted);">สายลับในเกม</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn btn-sm" onclick="changeUnderCount(-1)" style="width:32px;height:32px;padding:0;font-size:18px;line-height:1;">&#8722;</button>
+          <span id="under-count-lbl" style="font-family:'Bebas Neue';font-size:24px;color:var(--accent);min-width:20px;text-align:center;">1</span>
+          <button class="btn btn-sm" onclick="changeUnderCount(1)" style="width:32px;height:32px;padding:0;font-size:18px;line-height:1;">+</button>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="padding:0.75rem 1.25rem;">
+      <div class="check-row" id="white-row" onclick="toggleWhite()">
         <div class="chk" id="white-chk"></div>
         <div>
           <div style="font-size:14px;">เพิ่ม Mr. White</div>
-          <div style="font-size:12px;color:var(--muted);">ผู้เล่นที่ไม่รู้คำ</div>
+          <div style="font-size:12px;color:var(--muted);" id="white-hint">ผู้เล่นที่ไม่รู้คำ (ต้องมีอย่างน้อย 4 คน)</div>
         </div>
       </div>
     </div>
@@ -290,7 +303,7 @@
 <div id="s-voting" class="screen">
   <div style="font-family:'Bebas Neue';font-size:22px;letter-spacing:3px;color:var(--accent);margin-bottom:4px;" id="vote-round-lbl">รอบที่ 1 — โหวต</div>
   <div class="vote-bar"><div class="vote-bar-fill" id="vote-prog" style="width:0%"></div></div>
-  <p style="font-size:13px;color:var(--muted);margin-bottom:1rem;">เลือกคนที่สงสัยว่าเป็น Undercover (<span id="voted-count">0</span>/<span id="voted-total">0</span>)</p>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:1rem;">โหวตแล้ว <span id="voted-count">0</span>/<span id="voted-total">0</span> คน</p>
 
   <div id="vote-players"></div>
 
@@ -304,8 +317,10 @@
     <div id="elim-av" class="av" style="width:56px;height:56px;font-size:20px;margin:0 auto 1rem;"></div>
     <div style="font-family:'Bebas Neue';font-size:38px;letter-spacing:4px;" id="elim-name"></div>
     <div style="margin:0.5rem 0;" id="elim-role"></div>
-    <div style="font-size:13px;color:var(--muted);margin-top:1rem;">คำของเขา/เธอ</div>
-    <div style="font-size:26px;font-weight:600;color:var(--accent);margin-top:4px;" id="elim-word"></div>
+    <div id="elim-word-wrap" style="display:none;">
+      <div style="font-size:13px;color:var(--muted);margin-top:1rem;">คำของเขา/เธอ</div>
+      <div style="font-size:26px;font-weight:600;color:var(--accent);margin-top:4px;" id="elim-word"></div>
+    </div>
   </div>
 
   <div id="white-guess-wrap" style="display:none;" class="card">
@@ -366,6 +381,7 @@ let isHost = false;
 let myRole = null;
 let myWord = '';
 let hasWhiteOn = false;
+let underCountVal = 1;
 let currentPlayers = [];
 let currentRound = 1;
 let hasVoted = false;
@@ -447,6 +463,7 @@ socket.on('players-update', (players) => {
   currentPlayers = players;
   document.getElementById('player-count').textContent = players.length;
   renderPlayers(players, 'lobby-players');
+  if (isHost) updateWhiteAvailability();
   if (document.getElementById('s-playing').classList.contains('active')) {
     renderPlayers(players, 'playing-players');
   }
@@ -461,14 +478,13 @@ function randomWords() {
   const pair = WORD_PAIRS[Math.floor(Math.random() * WORD_PAIRS.length)];
   document.getElementById('w-citizen').value = pair[0];
   document.getElementById('w-under').value = pair[1];
-  // hide after random
   wordsVisible = false;
-  document.getElementById('w-citizen').type = 'password';
-  document.getElementById('w-under').type = 'password';
+  document.getElementById('w-citizen').style.filter = 'blur(4px)';
+  document.getElementById('w-under').style.filter = 'blur(4px)';
   document.getElementById('toggle-words-btn').textContent = '👁 แสดงคำ';
+  document.getElementById('toggle-words-btn').style.color = 'var(--muted)';
   const preview = document.getElementById('words-preview');
   preview.style.display = 'none';
-  preview.textContent = 'กรุณาซ่อนจอจากผู้เล่นคนอื่นก่อน';
   toast('สุ่มคู่คำแล้ว — กด "แสดงคำ" เพื่อดู');
 }
 function toggleShowWords() {
@@ -478,8 +494,8 @@ function toggleShowWords() {
   const btn = document.getElementById('toggle-words-btn');
   const preview = document.getElementById('words-preview');
   if (wordsVisible) {
-    ci.type = 'text';
-    wu.type = 'text';
+    ci.style.filter = 'none';
+    wu.style.filter = 'none';
     btn.textContent = '🙈 ซ่อนคำ';
     btn.style.color = 'var(--accent)';
     preview.style.display = 'block';
@@ -493,22 +509,51 @@ function toggleShowWords() {
       preview.textContent = 'ยังไม่ได้ใส่คำ';
     }
   } else {
-    ci.type = 'password';
-    wu.type = 'password';
+    ci.style.filter = 'blur(4px)';
+    wu.style.filter = 'blur(4px)';
     btn.textContent = '👁 แสดงคำ';
     btn.style.color = 'var(--muted)';
     preview.style.display = 'none';
+  }
+}
+function changeUnderCount(delta) {
+  const n = currentPlayers.length || 3;
+  // ต้องเหลือ citizen มากกว่า undercover อย่างน้อย 1 + white slot ถ้าเปิด
+  const slots = n - (hasWhiteOn ? 1 : 0);
+  // max undercover คือครึ่งของ slots ลบ 1 (citizen ต้องมากกว่าเสมอ)
+  const maxUnder = Math.max(1, Math.floor((slots - 1) / 2));
+  underCountVal = Math.min(Math.max(1, underCountVal + delta), maxUnder);
+  document.getElementById('under-count-lbl').textContent = underCountVal;
+}
+function updateWhiteAvailability() {
+  const n = currentPlayers.length;
+  const row = document.getElementById('white-row');
+  const hint = document.getElementById('white-hint');
+  if (n < 4) {
+    row.style.opacity = '0.4';
+    row.style.pointerEvents = 'none';
+    hint.textContent = 'ต้องการผู้เล่นอย่างน้อย 4 คน';
+    if (hasWhiteOn) {
+      hasWhiteOn = false;
+      document.getElementById('white-chk').classList.remove('on');
+      changeUnderCount(0);
+    }
+  } else {
+    row.style.opacity = '1';
+    row.style.pointerEvents = '';
+    hint.textContent = 'ผู้เล่นที่ไม่รู้คำ';
   }
 }
 function toggleWhite() {
   hasWhiteOn = !hasWhiteOn;
   const el = document.getElementById('white-chk');
   if (hasWhiteOn) el.classList.add('on'); else el.classList.remove('on');
+  changeUnderCount(0);
 }
 function startGame() {
   const wc = document.getElementById('w-citizen').value.trim();
   const wu = document.getElementById('w-under').value.trim();
-  socket.emit('start-game', { wordCitizen: wc, wordUnder: wu, hasWhite: hasWhiteOn });
+  socket.emit('start-game', { wordCitizen: wc, wordUnder: wu, hasWhite: hasWhiteOn, underCount: underCountVal });
 }
 
 socket.on('game-started', ({ round }) => {
@@ -543,23 +588,23 @@ socket.on('voting-started', () => {
   document.getElementById('voted-count').textContent = 0;
   document.getElementById('vote-prog').style.width = '0%';
   document.getElementById('already-voted').style.display = 'none';
-  renderVotePlayers({});
+  renderVotePlayers();
   showScreen('s-voting');
 });
 
-function renderVotePlayers(votes) {
+function renderVotePlayers() {
   const alive = currentPlayers.filter(p => p.alive);
   renderPlayers(alive, 'vote-players', {
     selectable: !hasVoted,
     selected: selectedVote,
-    votes,
+    votes: {}, // ไม่แสดง badge โหวตระหว่างโหวต
     onSelect: (pid) => {
       if (hasVoted) return;
       selectedVote = pid;
       socket.emit('cast-vote', { targetId: pid });
       hasVoted = true;
       document.getElementById('already-voted').style.display = 'block';
-      renderVotePlayers(votes);
+      renderVotePlayers();
     }
   });
 }
@@ -567,7 +612,7 @@ function renderVotePlayers(votes) {
 socket.on('vote-update', ({ votes, votedCount, total }) => {
   document.getElementById('voted-count').textContent = votedCount;
   document.getElementById('vote-prog').style.width = Math.round((votedCount/total)*100) + '%';
-  renderVotePlayers(votes);
+  renderVotePlayers(); // ไม่ส่ง votes ให้แสดง
 });
 
 // ===== ELIMINATION =====
@@ -581,13 +626,38 @@ socket.on('elimination-result', ({ eliminated, votes }) => {
   document.getElementById('elim-name').textContent = eliminated.name;
   document.getElementById('elim-word').textContent = eliminated.role === 'white' ? '(ไม่มีคำ)' : eliminated.word;
 
-  document.getElementById('elim-role').innerHTML = '';
+  // แสดง role เฉพาะ host
+  const roleEl = document.getElementById('elim-role');
+  if (isHost) {
+    let roleTag = '';
+    if (eliminated.role === 'undercover') roleTag = '<span class="role-tag r-undercover">Undercover</span>';
+    else if (eliminated.role === 'white') roleTag = '<span class="role-tag r-white">Mr. White</span>';
+    else roleTag = '<span class="role-tag r-citizen">พลเมือง</span>';
+    roleEl.innerHTML = roleTag;
+  } else {
+    roleEl.innerHTML = '';
+  }
+
+  // ซ่อนคำสำหรับทุกคน (ยกเว้นโชว์ตอนจบเกม)
+  document.getElementById('elim-word-wrap').style.display = 'none';
 
   elimIsWhite = eliminated.role === 'white';
   elimIsMe = eliminated.id === myId;
 
   document.getElementById('white-guess-wrap').style.display = 'none';
-  document.getElementById('result-actions').innerHTML = '';
+
+  // Show next-round button for non-white elimination (white case handled by white-must-guess)
+  if (eliminated.role !== 'white') {
+    if (isHost) {
+      document.getElementById('result-actions').innerHTML =
+        `<button class="btn btn-primary btn-full" onclick="goNextRound()" style="padding:13px;font-size:15px;letter-spacing:1px;">รอบต่อไป →</button>`;
+    } else {
+      document.getElementById('result-actions').innerHTML =
+        `<p class="center muted" style="font-size:13px;">รอ host เริ่มรอบต่อไป...</p>`;
+    }
+  } else {
+    document.getElementById('result-actions').innerHTML = '';
+  }
 });
 
 socket.on('white-must-guess', ({ name }) => {
@@ -668,6 +738,7 @@ socket.on('game-end', ({ winner, wordCitizen, wordUnder, players }) => {
   showScreen('s-end');
 });
 
+function goNextRound() { socket.emit('next-round'); }
 function playAgain() { socket.emit('play-again'); }
 
 socket.on('back-to-lobby', () => {
