@@ -64,6 +64,7 @@
   .code-display { font-family:'Bebas Neue'; font-size:52px; letter-spacing:12px; color:var(--accent); text-align:center; padding:1rem 0; text-shadow:0 0 30px rgba(200,169,110,0.3); }
 
   .player-row { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border:1px solid rgba(255,255,255,0.05); border-radius:2px; margin-bottom:5px; }
+  .player-row.turn-first { border-color:var(--accent); background:rgba(200,169,110,0.08); }
   .player-row.eliminated { opacity:0.3; }
   .player-row.vote-on { border-color:var(--red); background:rgba(192,57,43,0.06); }
   .player-row.selectable { cursor:pointer; }
@@ -287,7 +288,7 @@
     <div class="word-big" id="my-word" style="font-size:36px;"></div>
   </div>
 
-  <div class="section-lbl">ผู้เล่นในเกม</div>
+  <div class="section-lbl" style="margin-bottom:8px;">ผู้เล่นในเกม</div>
   <div id="playing-players"></div>
 
   <div class="mt2" id="host-vote-btn-wrap" style="display:none;">
@@ -307,7 +308,7 @@
 
   <div id="vote-players"></div>
 
-  <p class="center muted mt" id="already-voted" style="font-size:13px;display:none;">คุณโหวตแล้ว — รอคนอื่น...</p>
+  <p class="center muted mt" id="already-voted" style="font-size:13px;display:none;align-items:center;justify-content:center;gap:8px;">คุณโหวตแล้ว — รอคนอื่น... <button onclick="cancelVote()" style="background:none;border:1px solid var(--red);color:var(--red);font-size:12px;padding:3px 10px;border-radius:2px;cursor:pointer;font-family:'Sarabun',sans-serif;">ยกเลิกโหวต</button></p>
 </div>
 
 <!-- RESULT (elimination) -->
@@ -444,13 +445,28 @@ function renderPlayers(players, containerId, opts = {}) {
     const hostBadge = p.isHost ? `<span style="font-size:10px;color:var(--accent);">HOST</span>` : '';
     const elimBadge = !p.alive ? `<span style="font-size:10px;color:var(--red);letter-spacing:1px;">OUT</span>` : '';
     const youBadge = p.id === myId ? `<span style="font-size:10px;color:var(--muted);">(คุณ)</span>` : '';
+
+    // turn order badge
+    let turnBadge = '';
+    if (opts.turnOrderMap && p.alive) {
+      const turnNum = opts.turnOrderMap[p.id];
+      if (turnNum !== undefined) {
+        if (turnNum === 1) {
+          div.classList.add('turn-first');
+          turnBadge = `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent);color:#1a1610;font-family:'Bebas Neue';font-size:13px;letter-spacing:1px;padding:3px 10px;border-radius:2px;">&#9654; เริ่มก่อน</span>`;
+        } else {
+          turnBadge = `<span style="font-family:'Bebas Neue';font-size:12px;color:var(--muted);letter-spacing:1px;">${turnNum}</span>`;
+        }
+      }
+    }
+
     div.innerHTML = `
       <div class="flex">
         <div class="av" style="background:${av.bg};color:${av.c};">${p.name[0]}</div>
         <span style="font-size:15px;">${p.name}</span>
         ${youBadge}${hostBadge}
       </div>
-      <div class="flex" style="gap:6px;">${voteBadge}${elimBadge}</div>
+      <div class="flex" style="gap:6px;">${voteBadge}${elimBadge}${turnBadge}</div>
     `;
     cont.appendChild(div);
   });
@@ -490,7 +506,7 @@ socket.on('players-update', (players) => {
   renderPlayers(players, 'lobby-players');
   if (isHost) updateWhiteAvailability();
   if (document.getElementById('s-playing').classList.contains('active')) {
-    renderPlayers(players, 'playing-players');
+    renderPlayingPlayers();
   }
 });
 
@@ -629,10 +645,19 @@ function renderVotePlayers() {
       selectedVote = pid;
       socket.emit('cast-vote', { targetId: pid });
       hasVoted = true;
-      document.getElementById('already-voted').style.display = 'block';
+      document.getElementById('already-voted').style.display = 'flex';
       renderVotePlayers();
     }
   });
+}
+
+function cancelVote() {
+  if (!hasVoted) return;
+  socket.emit('cancel-vote');
+  hasVoted = false;
+  selectedVote = null;
+  document.getElementById('already-voted').style.display = 'none';
+  renderVotePlayers();
 }
 
 socket.on('vote-update', ({ votes, votedCount, total }) => {
@@ -773,12 +798,16 @@ function renderPlayingPlayers() {
       const p = alive.find(p => p.id === id);
       if (p) ordered.push(p);
     });
-    // เผื่อมีคนที่ไม่อยู่ใน turnOrder
     alive.forEach(p => { if (!ordered.find(o => o.id === p.id)) ordered.push(p); });
   } else {
     ordered = alive;
   }
-  renderPlayers([...ordered, ...dead], 'playing-players');
+
+  // สร้าง map id -> ลำดับที่ต้องบรรยาย
+  const turnOrderMap = {};
+  ordered.forEach((p, i) => { turnOrderMap[p.id] = i + 1; });
+
+  renderPlayers([...ordered, ...dead], 'playing-players', { turnOrderMap });
 }
 function goNextRound() { socket.emit('next-round'); }
 function playAgain() { socket.emit('play-again'); }

@@ -143,7 +143,7 @@ io.on('connection', (socket) => {
       io.to(p.id).emit('your-role', { role: p.role, word: p.word });
     });
 
-    io.to(code).emit('game-started', { round: room.round, turnOrder: room.players.map(p => p.id) });
+    io.to(code).emit('game-started', { round: room.round, turnOrder: shuffle(room.players.map(p => p.id)) });
     io.to(code).emit('players-update', publicPlayers(room));
   });
 
@@ -158,14 +158,26 @@ io.on('connection', (socket) => {
     io.to(code).emit('voting-started');
   });
 
-  // Cast vote
+  // Cast vote (ปรับปรุงให้ลบโหวตเก่าอัตโนมัติถ้ามีการโหวตซ้ำ)
   socket.on('cast-vote', ({ targetId }) => {
     const code = socket.data.room;
     const room = getRoom(code);
     if (!room || room.phase !== 'voting') return;
     const voter = room.players.find(p => p.id === socket.id);
-    if (!voter || !voter.alive || voter.voted) return;
+    
+    // ตรวจสอบว่าผู้เล่นมีสิทธิ์โหวตหรือไม่
+    if (!voter || !voter.alive) return;
+
+    // หากผู้เล่นเคยโหวตไปแล้ว ให้ทำการหักคะแนนจากคนที่เคยโหวตให้ก่อน
+    if (voter.voted && voter.votedFor) {
+      if (typeof room.votes[voter.votedFor] === 'number') {
+        room.votes[voter.votedFor] = Math.max(0, room.votes[voter.votedFor] - 1);
+      }
+    }
+
+    // อัปเดตสถานะการโหวตใหม่
     voter.voted = true;
+    voter.votedFor = targetId;
     room.votes[targetId] = (room.votes[targetId] || 0) + 1;
 
     const alivePlayers = room.players.filter(p => p.alive);
@@ -176,6 +188,28 @@ io.on('connection', (socket) => {
     if (votedCount === alivePlayers.length) {
       resolveVote(room, code);
     }
+  });
+
+  // Cancel vote (ปรับปรุงให้การหักลบคะแนนแม่นยำขึ้น)
+  socket.on('cancel-vote', () => {
+    const code = socket.data.room;
+    const room = getRoom(code);
+    if (!room || room.phase !== 'voting') return;
+    const voter = room.players.find(p => p.id === socket.id);
+    if (!voter || !voter.alive || !voter.voted) return;
+
+    // ลบโหวตออกอย่างปลอดภัย ไม่ให้คะแนนติดลบ
+    if (voter.votedFor && typeof room.votes[voter.votedFor] === 'number') {
+      room.votes[voter.votedFor] = Math.max(0, room.votes[voter.votedFor] - 1);
+    }
+    
+    // รีเซ็ตสถานะของผู้เล่น
+    voter.voted = false;
+    voter.votedFor = null;
+
+    const alivePlayers = room.players.filter(p => p.alive);
+    const votedCount = alivePlayers.filter(p => p.voted).length;
+    io.to(code).emit('vote-update', { votes: room.votes, votedCount, total: alivePlayers.length });
   });
 
   // White guess
