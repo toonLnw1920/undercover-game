@@ -5,9 +5,13 @@ const path = require('path');
 
 require('dotenv').config();
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// เปลี่ยนบรรทัดนี้ใน server.js
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+
+// ใช้ชื่อโมเดลแบบนี้ครับ
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-2.5-flash" 
+});
 
 const app = express();
 const server = http.createServer(app);
@@ -121,37 +125,35 @@ io.on('connection', (socket) => {
 
   // --- ระบบ AI สร้างคู่คำ Real-time ---
   socket.on('request-ai-words', async () => {
-    try {
-      // เลือกใช้โมเดล gemini-1.5-flash เพราะทำงานได้เร็วและเหมาะกับงาน Text สั้นๆ
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      
-      // Prompt สั่งงาน AI ให้คืนค่าเป็น JSON Array เท่านั้น
-      const prompt = `
-        คุณคือผู้ช่วยคิดคำศัพท์สำหรับเกม Undercover (เกมสายลับ)
-        จงสุ่มสร้างคู่คำศัพท์ภาษาไทย 1 คู่ ที่มีความคล้ายคลึงกัน แต่อยู่คนละหมวดหมู่หรือมีความหมายต่างกันนิดหน่อย
-        ตัวอย่างเช่น: ["ส้มตำ", "ลาบ"], ["โรงพยาบาล", "คลินิก"], ["เปียโน", "กีตาร์"], ["แบทแมน", "สไปเดอร์แมน"]
-        
-        ข้อกำหนด:
-        - คิดคู่คำที่แปลกใหม่และไม่ซ้ำซาก
-        - ตอบกลับมาเป็น JSON Array รูปแบบ ["คำของพลเมือง", "คำของสายลับ"] เท่านั้น ห้ามพิมพ์ข้อความอธิบายใดๆ เพิ่มเติมเด็ดขาด
-      `;
+  try {
+    // 1. ลองเปลี่ยนกลับมาเป็นชื่อมาตรฐาน (ไม่มี -latest)
+    // 2. หากยังไม่ได้ ให้ลองเปลี่ยนเป็น "gemini-1.5-pro" เพื่อเช็กว่าติดที่รุ่นโมเดลหรือไม่
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-      const result = await model.generateContent(prompt);
-      let text = result.response.text();
-      
-      // ตัด backticks (```json ... ```) ที่ AI อาจจะแถมมาออก เพื่อให้ parse JSON ได้
-      text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-      
-      const pair = JSON.parse(text); // แปลงข้อความเป็น Array
+    const prompt = `ทำหน้าที่เป็นกรรมการเกม Undercover: 
+    สร้างคำภาษาไทย 2 คำที่ใกล้เคียงกัน (คำสำหรับคนปกติ และ คำสำหรับสายลับ) 
+    ตอบกลับในรูปแบบ JSON Array เท่านั้น เช่น ["แมว", "เสือ"]`;
 
-      // ส่งคู่คำกลับไปที่ผู้สร้างห้อง (Host)
+    // ใช้การเรียกแบบรวบยอดเพื่อลดโอกาสเกิด Error จากลำดับการรอ Promise
+    const result = await model.generateContent(prompt);
+    const text = result.response.text(); 
+    
+    // ทำความสะอาดข้อความเผื่อ AI ตอบ Markdown มา
+    const cleanedText = text.replace(/```json|```/g, "").trim();
+    const pair = JSON.parse(cleanedText);
+
+    if (Array.isArray(pair) && pair.length >= 2) {
       socket.emit('ai-words-result', { citizen: pair[0], under: pair[1] });
-      
-    } catch (error) {
-      console.error("AI Error:", error);
-      socket.emit('error', 'AI คิดคำล้มเหลว กรุณาลองกดใหม่อีกครั้ง');
+    } else {
+      throw new Error("Invalid format from AI");
     }
-  });
+
+  } catch (error) {
+    // พิมพ์ Error ออกมาดูให้ละเอียด
+    console.error("AI Error Log:", error.message); 
+    socket.emit('error', 'AI ยังไม่พร้อมใช้งานในขณะนี้ กรุณาลองใหม่');
+  }
+});
 
   // Start game (host only)
   socket.on('start-game', ({ wordCitizen, wordUnder, hasWhite, underCount }) => {
