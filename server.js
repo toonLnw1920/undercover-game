@@ -3,9 +3,17 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 
+require('dotenv').config();
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// เปลี่ยนบรรทัดนี้ใน server.js
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -109,6 +117,40 @@ io.on('connection', (socket) => {
     socket.data.name = name;
     socket.emit('room-joined', { code, playerId: socket.id });
     io.to(code).emit('players-update', publicPlayers(room));
+  });
+
+  // --- ระบบ AI สร้างคู่คำ Real-time ---
+  socket.on('request-ai-words', async () => {
+    try {
+      // เลือกใช้โมเดล gemini-1.5-flash เพราะทำงานได้เร็วและเหมาะกับงาน Text สั้นๆ
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      
+      // Prompt สั่งงาน AI ให้คืนค่าเป็น JSON Array เท่านั้น
+      const prompt = `
+        คุณคือผู้ช่วยคิดคำศัพท์สำหรับเกม Undercover (เกมสายลับ)
+        จงสุ่มสร้างคู่คำศัพท์ภาษาไทย 1 คู่ ที่มีความคล้ายคลึงกัน แต่อยู่คนละหมวดหมู่หรือมีความหมายต่างกันนิดหน่อย
+        ตัวอย่างเช่น: ["ส้มตำ", "ลาบ"], ["โรงพยาบาล", "คลินิก"], ["เปียโน", "กีตาร์"], ["แบทแมน", "สไปเดอร์แมน"]
+        
+        ข้อกำหนด:
+        - คิดคู่คำที่แปลกใหม่และไม่ซ้ำซาก
+        - ตอบกลับมาเป็น JSON Array รูปแบบ ["คำของพลเมือง", "คำของสายลับ"] เท่านั้น ห้ามพิมพ์ข้อความอธิบายใดๆ เพิ่มเติมเด็ดขาด
+      `;
+
+      const result = await model.generateContent(prompt);
+      let text = result.response.text();
+      
+      // ตัด backticks (```json ... ```) ที่ AI อาจจะแถมมาออก เพื่อให้ parse JSON ได้
+      text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      
+      const pair = JSON.parse(text); // แปลงข้อความเป็น Array
+
+      // ส่งคู่คำกลับไปที่ผู้สร้างห้อง (Host)
+      socket.emit('ai-words-result', { citizen: pair[0], under: pair[1] });
+      
+    } catch (error) {
+      console.error("AI Error:", error);
+      socket.emit('error', 'AI คิดคำล้มเหลว กรุณาลองกดใหม่อีกครั้ง');
+    }
   });
 
   // Start game (host only)

@@ -236,8 +236,11 @@
         <input type="text" id="w-citizen" placeholder="คำพลเมือง" style="margin:0;flex:1;filter:blur(4px);transition:filter 0.2s;" autocomplete="off">
         <input type="text" id="w-under" placeholder="คำ Undercover" style="margin:0;flex:1;filter:blur(4px);transition:filter 0.2s;" autocomplete="off">
       </div>
-      <div class="flex" style="justify-content:space-between;align-items:center;">
-        <button class="random-btn" onclick="randomWords()">🎲 สุ่มคู่คำ</button>
+      <div class="flex" style="justify-content:space-between;align-items:center; flex-wrap: wrap; gap: 10px;">
+        <div style="display:flex; gap: 10px;">
+          <button class="random-btn" onclick="randomWords()">🎲 สุ่มปกติ</button>
+          <button class="random-btn" onclick="randomWordsAI()" style="color:#cc88dd;">🤖 ให้ AI คิดคำให้</button>
+        </div>
         <button class="random-btn" id="toggle-words-btn" onclick="toggleShowWords()" style="color:var(--muted);">👁 แสดงคำ</button>
       </div>
       <div id="words-preview" style="display:none;margin-top:8px;background:rgba(192,57,43,0.08);border:1px solid rgba(192,57,43,0.25);border-radius:2px;padding:8px 12px;font-size:13px;color:var(--muted);">
@@ -818,6 +821,34 @@ socket.on('back-to-lobby', () => {
   document.getElementById('guest-wait').style.display = isHost ? 'none' : 'block';
   showScreen('s-lobby');
 });
+
+// ฟังก์ชันส่งคำขอไปหา AI
+function randomWordsAI() {
+  toast('🤖 กำลังให้ AI คิดคู่คำให้ โปรดรอสักครู่...');
+  
+  // สั่งให้ input แสดงสถานะโหลด (หมุนๆ หรือเบลอเพิ่ม)
+  document.getElementById('w-citizen').value = 'กำลังคิด...';
+  document.getElementById('w-under').value = 'กำลังคิด...';
+  
+  socket.emit('request-ai-words');
+}
+
+// เมื่อเซิร์ฟเวอร์ส่งคำที่ AI คิดเสร็จกลับมา
+socket.on('ai-words-result', ({ citizen, under }) => {
+  document.getElementById('w-citizen').value = citizen;
+  document.getElementById('w-under').value = under;
+  
+  // รีเซ็ตการแสดงผลให้เซนเซอร์คำเอาไว้
+  wordsVisible = false;
+  document.getElementById('w-citizen').style.filter = 'blur(4px)';
+  document.getElementById('w-under').style.filter = 'blur(4px)';
+  document.getElementById('toggle-words-btn').textContent = '👁 แสดงคำ';
+  document.getElementById('toggle-words-btn').style.color = 'var(--muted)';
+  document.getElementById('words-preview').style.display = 'none';
+  
+  toast('✨ AI สุ่มคู่คำให้เรียบร้อยแล้ว!');
+});
+
 </script>
 </body>
 </html>
