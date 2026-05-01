@@ -8,15 +8,9 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// ใช้ชื่อโมเดลแบบนี้ครับ
-const model = genAI.getGenerativeModel({ 
-  model: "gemini-2.5-flash" 
-});
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
-
 
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -60,14 +54,14 @@ const WORD_PAIRS = [
 ];
 
 function makeCode() {
-  return Math.random().toString(36).substring(2,7).toUpperCase();
+  return Math.random().toString(36).substring(2, 7).toUpperCase();
 }
 
 function shuffle(arr) {
   const a = [...arr];
-  for (let i = a.length-1; i > 0; i--) {
-    const j = Math.floor(Math.random()*(i+1));
-    [a[i],a[j]] = [a[j],a[i]];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
 }
@@ -125,35 +119,35 @@ io.on('connection', (socket) => {
 
   // --- ระบบ AI สร้างคู่คำ Real-time ---
   socket.on('request-ai-words', async () => {
-  try {
-    // 1. ลองเปลี่ยนกลับมาเป็นชื่อมาตรฐาน (ไม่มี -latest)
-    // 2. หากยังไม่ได้ ให้ลองเปลี่ยนเป็น "gemini-1.5-pro" เพื่อเช็กว่าติดที่รุ่นโมเดลหรือไม่
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+    const prompt = `คุณคือกรรมการเกม Undercover ภาษาไทย
+สร้างคู่คำ 2 คำที่มีความหมายใกล้เคียงกันแต่ต่างกันเล็กน้อย เหมาะสำหรับเกม
+ตัวอย่าง: ["แมว", "เสือ"], ["ชา", "กาแฟ"], ["รถยนต์", "มอเตอร์ไซค์"]
+ตอบเป็น JSON Array เท่านั้น ไม่มีข้อความอื่น เช่น ["คำพลเมือง", "คำ Undercover"]`;
 
-    const prompt = `ทำหน้าที่เป็นกรรมการเกม Undercover: 
-    สร้างคำภาษาไทย 2 คำที่ใกล้เคียงกัน (คำสำหรับคนปกติ และ คำสำหรับสายลับ) 
-    ตอบกลับในรูปแบบ JSON Array เท่านั้น เช่น ["แมว", "เสือ"]`;
-
-    // ใช้การเรียกแบบรวบยอดเพื่อลดโอกาสเกิด Error จากลำดับการรอ Promise
-    const result = await model.generateContent(prompt);
-    const text = result.response.text(); 
-    
-    // ทำความสะอาดข้อความเผื่อ AI ตอบ Markdown มา
-    const cleanedText = text.replace(/```json|```/g, "").trim();
-    const pair = JSON.parse(cleanedText);
-
-    if (Array.isArray(pair) && pair.length >= 2) {
-      socket.emit('ai-words-result', { citizen: pair[0], under: pair[1] });
-    } else {
-      throw new Error("Invalid format from AI");
+    for (const modelName of models) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(prompt);
+        const text = result.response.text().replace(/```json|```/g, '').trim();
+        const pair = JSON.parse(text);
+        if (Array.isArray(pair) && pair.length >= 2) {
+          console.log(`✅ AI สำเร็จด้วย ${modelName}`);
+          socket.emit('ai-words-result', { citizen: pair[0], under: pair[1] });
+          return;
+        }
+        throw new Error('Invalid format');
+      } catch (error) {
+        console.warn(`⚠️ ${modelName} ล้มเหลว: ${error.message}`);
+      }
     }
 
-  } catch (error) {
-    // พิมพ์ Error ออกมาดูให้ละเอียด
-    console.error("AI Error Log:", error.message); 
-    socket.emit('error', 'AI ยังไม่พร้อมใช้งานในขณะนี้ กรุณาลองใหม่');
-  }
-});
+    // ทุก model ล้มเหลว → fallback สุ่มจาก WORD_PAIRS
+    console.error('❌ AI ทุก model ล้มเหลว ใช้ WORD_PAIRS แทน');
+    const fallback = WORD_PAIRS[Math.floor(Math.random() * WORD_PAIRS.length)];
+    socket.emit('ai-words-result', { citizen: fallback[0], under: fallback[1] });
+    socket.emit('error', 'AI ไม่พร้อมตอนนี้ — ใช้คำสุ่มจากคลังแทน');
+  });
 
   // Start game (host only)
   socket.on('start-game', ({ wordCitizen, wordUnder, hasWhite, underCount }) => {
@@ -208,7 +202,7 @@ io.on('connection', (socket) => {
     const room = getRoom(code);
     if (!room || room.phase !== 'voting') return;
     const voter = room.players.find(p => p.id === socket.id);
-    
+
     // ตรวจสอบว่าผู้เล่นมีสิทธิ์โหวตหรือไม่
     if (!voter || !voter.alive) return;
 
@@ -246,7 +240,7 @@ io.on('connection', (socket) => {
     if (voter.votedFor && typeof room.votes[voter.votedFor] === 'number') {
       room.votes[voter.votedFor] = Math.max(0, room.votes[voter.votedFor] - 1);
     }
-    
+
     // รีเซ็ตสถานะของผู้เล่น
     voter.voted = false;
     voter.votedFor = null;
